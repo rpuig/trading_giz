@@ -1,0 +1,13 @@
+# Python scanner image
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY scanner/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY scanner/ ./scanner/
+WORKDIR /app/scanner
+
+# DB will be mounted at /app/market_data.sqlite (shared volume)
+ENV SCAN_INTERVAL=60
+CMD ["python", "runner.py"]

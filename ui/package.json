@@ -1,0 +1,17 @@
+{
+  "name": "crypto-ui",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 4000",
+    "build": "next build",
+    "start": "next start -p 4000"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.0",
+    "next": "14.2.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "swr": "^2.2.5",
+    "lightweight-charts": "^4.2.2"
+  }
+}
