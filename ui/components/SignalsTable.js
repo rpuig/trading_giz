@@ -7,10 +7,8 @@ const fetcher = (...args) => fetch(...args).then(r => r.json());
 export default function SignalsTable({ onSelect }) {
   const [filters, setFilters] = useState({ exchange:'', symbol:'', timeframe:'', signal:'' });
   const [refreshMs, setRefreshMs] = useState(10000);
-
-  // sort state
-  const [sortKey, setSortKey] = useState('ts');     // 'ts' | 'exchange' | 'symbol' | 'timeframe' | 'signal' | 'price' | 'payload'
-  const [sortDir, setSortDir] = useState('desc');   // 'asc' | 'desc'
+  const [sortKey, setSortKey] = useState('ts');
+  const [sortDir, setSortDir] = useState('desc');
 
   const qs = new URLSearchParams();
   Object.entries(filters).forEach(([k,v]) => v && qs.append(k,v));
@@ -22,25 +20,21 @@ export default function SignalsTable({ onSelect }) {
   const meta = data?.meta || { exchanges:[], symbols:[], timeframes:[], signals:[] };
   const rowsRaw = data?.rows || [];
 
-  // sorting
   const rows = useMemo(() => {
     const arr = [...rowsRaw];
     const dir = sortDir === 'asc' ? 1 : -1;
     arr.sort((a,b) => {
       let va = a[sortKey], vb = b[sortKey];
-      // normalize
-      if (sortKey === 'ts') { va = Number(va); vb = Number(vb); }
-      else if (sortKey === 'price') { va = Number(va); vb = Number(vb); }
+      if (sortKey === 'ts' || sortKey === 'price') { va = Number(va); vb = Number(vb); }
       else { va = String(va || ''); vb = String(vb || ''); }
       if (va < vb) return -1 * dir;
       if (va > vb) return 1 * dir;
-      // tie‑break by ts desc to keep consistent
       return (Number(b.ts) - Number(a.ts));
     });
     return arr;
   }, [rowsRaw, sortKey, sortDir]);
 
-  const onRowClick = (r) => onSelect?.({ exchange: r.exchange, symbol: r.symbol, timeframe: r.timeframe });
+  const onRowClick = (r) => onSelect?.({ exchange: r.exchange, symbol: r.symbol, timeframe: r.timeframe, ts: r.ts });
 
   const onSort = (key) => {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
@@ -91,24 +85,12 @@ export default function SignalsTable({ onSelect }) {
         <table>
           <thead>
             <tr>
-              <th style={{cursor:'pointer'}} onClick={()=>onSort('ts')}>
-                TS <Arrow col="ts" />
-              </th>
-              <th style={{cursor:'pointer'}} onClick={()=>onSort('exchange')}>
-                Exchange <Arrow col="exchange" />
-              </th>
-              <th style={{cursor:'pointer'}} onClick={()=>onSort('symbol')}>
-                Símbolo <Arrow col="symbol" />
-              </th>
-              <th style={{cursor:'pointer'}} onClick={()=>onSort('timeframe')}>
-                TF <Arrow col="timeframe" />
-              </th>
-              <th style={{cursor:'pointer'}} onClick={()=>onSort('signal')}>
-                Señal <Arrow col="signal" />
-              </th>
-              <th style={{cursor:'pointer'}} onClick={()=>onSort('price')}>
-                Precio <Arrow col="price" />
-              </th>
+              <th style={{cursor:'pointer'}} onClick={()=>onSort('ts')}>TS <Arrow col="ts" /></th>
+              <th style={{cursor:'pointer'}} onClick={()=>onSort('exchange')}>Exchange <Arrow col="exchange" /></th>
+              <th style={{cursor:'pointer'}} onClick={()=>onSort('symbol')}>Símbolo <Arrow col="symbol" /></th>
+              <th style={{cursor:'pointer'}} onClick={()=>onSort('timeframe')}>TF <Arrow col="timeframe" /></th>
+              <th style={{cursor:'pointer'}} onClick={()=>onSort('signal')}>Señal <Arrow col="signal" /></th>
+              <th style={{cursor:'pointer'}} onClick={()=>onSort('price')}>Precio <Arrow col="price" /></th>
               <th>Payload</th>
             </tr>
           </thead>
