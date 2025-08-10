@@ -19,4 +19,4 @@ COPY --from=builder /app/node_modules ./node_modules
 # DB volume will be mounted at /data/market_data.sqlite
 ENV DB_PATH=/data/market_data.sqlite
 EXPOSE 4000
-CMD ["npm", "start", "-p", "4000"]
+CMD ["npm","start"]

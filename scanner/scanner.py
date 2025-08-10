@@ -9,26 +9,26 @@ from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
-
-import ccxt.async_support as ccxt  # versión async
+import ccxt.async_support as ccxt  # async
 
 DB_PATH = Path("../market_data.sqlite")
 
+# ---------- utilidades simples ----------
 def ema(series: pd.Series, span: int) -> pd.Series:
     return series.ewm(span=span, adjust=False).mean()
 
 def sma(series: pd.Series, window: int) -> pd.Series:
     return series.rolling(window=window, min_periods=window).mean()
 
+# ---------- indicadores básicos ----------
 def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
-    up = np.where(delta > 0, delta, 0.0)
-    down = np.where(delta < 0, -delta, 0.0)
-    roll_up = pd.Series(up, index=series.index).rolling(period).mean()
-    roll_down = pd.Series(down, index=series.index).rolling(period).mean()
-    rs = roll_up / (roll_down.replace(0, np.nan))
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    up = delta.clip(lower=0.0)
+    down = (-delta.clip(upper=0.0))
+    roll_up = up.rolling(period).mean()
+    roll_down = down.rolling(period).mean()
+    rs = roll_up / roll_down.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
 
 def macd(series: pd.Series, fast=12, slow=26, signal=9) -> Tuple[pd.Series, pd.Series, pd.Series]:
     macd_line = ema(series, fast) - ema(series, slow)
@@ -43,45 +43,162 @@ def bollinger(series: pd.Series, window=20, n_std=2) -> Tuple[pd.Series, pd.Seri
     lower = ma - n_std * std
     return lower, ma, upper
 
+# ---------- indicadores adicionales (foto) ----------
+def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    # On-Balance Volume clásico
+    direction = np.sign(close.diff().fillna(0))
+    return (direction * volume.fillna(0)).cumsum()
+
+def dmi_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14):
+    # Implementación compacta de +DI, -DI y ADX (Wilder)
+    up_move = high.diff()
+    down_move = (-low.diff())
+    plus_dm = ((up_move > down_move) & (up_move > 0)).astype(float) * up_move
+    minus_dm = ((down_move > up_move) & (down_move > 0)).astype(float) * down_move
+
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    atr = tr.rolling(period).mean()
+    plus_di = 100 * (plus_dm.rolling(period).mean() / atr.replace(0, np.nan))
+    minus_di = 100 * (minus_dm.rolling(period).mean() / atr.replace(0, np.nan))
+    dx = 100 * ( (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan) )
+    adx = dx.rolling(period).mean()
+    return plus_di, minus_di, adx
+
+def cci(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 20) -> pd.Series:
+    tp = (high + low + close) / 3.0
+    sma_tp = tp.rolling(period).mean()
+    mad = (tp - sma_tp).abs().rolling(period).mean()
+    return (tp - sma_tp) / (0.015 * mad.replace(0, np.nan))
+
+def stoch_rsi(series: pd.Series, rsi_period: int = 14, k: int = 3, d: int = 3):
+    r = rsi(series, rsi_period)
+    low_r = r.rolling(rsi_period).min()
+    high_r = r.rolling(rsi_period).max()
+    k_raw = 100 * (r - low_r) / (high_r - low_r).replace(0, np.nan)
+    k_line = k_raw.rolling(k).mean()
+    d_line = k_line.rolling(d).mean()
+    return k_line, d_line
+
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    close = df["close"]
-    df["sma20"] = sma(close, 20)
-    df["ema20"] = ema(close, 20)
-    df["ema50"] = ema(close, 50)
+    # Requiere columnas: open, high, low, close, volume
+    close = df["close"]; high = df["high"]; low = df["low"]; vol = df["volume"]
+
+    # MAs
+    df["sma20"]  = sma(close, 20)
+    df["sma50"]  = sma(close, 50)
+    df["sma100"] = sma(close, 100)
+
+    # RSI, MACD, Bollinger
     df["rsi14"] = rsi(close, 14)
-    macd_line, signal_line, hist = macd(close)
-    df["macd"] = macd_line
-    df["macd_signal"] = signal_line
-    df["macd_hist"] = hist
+    macd_line, signal_line, hist = macd(close, 12, 26, 9)
+    df["macd"] = macd_line; df["macd_signal"] = signal_line; df["macd_hist"] = hist
     bb_low, bb_mid, bb_up = bollinger(close, 20, 2)
-    df["bb_low"] = bb_low
-    df["bb_mid"] = bb_mid
-    df["bb_up"]  = bb_up
+    df["bb_low"] = bb_low; df["bb_mid"] = bb_mid; df["bb_up"]  = bb_up
+
+    # OBV y su EMA7 para pendiente
+    df["obv"] = obv(close, vol)
+    df["obv_ema7"] = ema(df["obv"], 7)
+
+    # DMI/ADX(14)
+    plus_di, minus_di, adx = dmi_adx(high, low, close, 14)
+    df["+di14"] = plus_di; df["-di14"] = minus_di; df["adx14"] = adx
+
+    # CCI(20)
+    df["cci20"] = cci(high, low, close, 20)
+
+    # Stoch RSI 14,3,3
+    k, d = stoch_rsi(close, 14, 3, 3)
+    df["stoch_k"] = k; df["stoch_d"] = d
+
     return df
 
+# ---------- señales ----------
 def compute_signal(df: pd.DataFrame) -> Optional[Dict]:
-    if len(df) < 50:
+    """Genera señales compuestas:
+    - supersold: TODOS en sobreventa
+    - superbought: TODOS en sobrecompra
+    """
+    if len(df) < 100:
         return None
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    macd_cross_up = (prev["macd"] <= prev["macd_signal"]) and (last["macd"] > last["macd_signal"])
-    rsi_rebound   = (prev["rsi14"] < 30) and (last["rsi14"] > prev["rsi14"])
-    above_ema     = last["close"] > last["ema20"]
+    # Umbrales
+    oversold = (
+        (last["close"] <= last["bb_low"]) and
+        (last["rsi14"] <= 30) and
+        (last["stoch_k"] <= 20) and (last["stoch_d"] <= 20) and
+        (last["cci20"] <= -100) and
+        (last["macd"] < last["macd_signal"]) and (last["macd"] < 0) and
+        (last["close"] < last["sma50"]) and (last["close"] < last["sma100"]) and
+        (last["obv"] < last["obv_ema7"]) and
+        (last["-di14"] > last["+di14"]) and (last["adx14"] >= 18)
+    )
 
-    if macd_cross_up and rsi_rebound and above_ema:
+    overbought = (
+        (last["close"] >= last["bb_up"]) and
+        (last["rsi14"] >= 70) and
+        (last["stoch_k"] >= 80) and (last["stoch_d"] >= 80) and
+        (last["cci20"] >= 100) and
+        (last["macd"] > last["macd_signal"]) and (last["macd"] > 0) and
+        (last["close"] > last["sma50"]) and (last["close"] > last["sma100"]) and
+        (last["obv"] > last["obv_ema7"]) and
+        (last["+di14"] > last["-di14"]) and (last["adx14"] >= 18)
+    )
+
+    if oversold:
         return {
             "timestamp": int(last.name),
             "price": float(last["close"]),
-            "signal": "LONG_MACD_RSI_EMA",
+            "signal": "supersold",
             "details": {
                 "rsi14": float(last["rsi14"]),
+                "stoch_k": float(last["stoch_k"]),
+                "stoch_d": float(last["stoch_d"]),
+                "cci20": float(last["cci20"]),
                 "macd": float(last["macd"]),
-                "macd_signal": float(last["macd_signal"])
+                "macd_signal": float(last["macd_signal"]),
+                "bb_low": float(last["bb_low"]),
+                "sma50": float(last["sma50"]),
+                "sma100": float(last["sma100"]),
+                "obv": float(last["obv"]),
+                "obv_ema7": float(last["obv_ema7"]),
+                "+di14": float(last["+di14"]),
+                "-di14": float(last["-di14"]),
+                "adx14": float(last["adx14"])
             }
         }
+
+    if overbought:
+        return {
+            "timestamp": int(last.name),
+            "price": float(last["close"]),
+            "signal": "superbought",
+            "details": {
+                "rsi14": float(last["rsi14"]),
+                "stoch_k": float(last["stoch_k"]),
+                "stoch_d": float(last["stoch_d"]),
+                "cci20": float(last["cci20"]),
+                "macd": float(last["macd"]),
+                "macd_signal": float(last["macd_signal"]),
+                "bb_up": float(last["bb_up"]),
+                "sma50": float(last["sma50"]),
+                "sma100": float(last["sma100"]),
+                "obv": float(last["obv"]),
+                "obv_ema7": float(last["obv_ema7"]),
+                "+di14": float(last["+di14"]),
+                "-di14": float(last["-di14"]),
+                "adx14": float(last["adx14"])
+            }
+        }
+
     return None
 
+# ---------- DB ----------
 def init_db(db_path: Path = DB_PATH):
     with sqlite3.connect(db_path) as con:
         cur = con.cursor()
@@ -148,8 +265,9 @@ def save_signal(con: sqlite3.Connection, exchange: str, symbol: str, timeframe: 
           int(sig["timestamp"]), sig["signal"], float(sig.get("price", 0.0)), str(sig.get("details"))))
     con.commit()
 
+# ---------- fetch & loop ----------
 async def fetch_ohlcv_incremental(ex, exchange_name: str, symbol: str, timeframe: str,
-                                  limit: int = 500, db_path: Path = DB_PATH) -> pd.DataFrame:
+                                  limit: int = 1000, db_path: Path = DB_PATH) -> pd.DataFrame:
     ms_in_min = 60 * 1000
     tf_map = {
         "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "2h": 120,
@@ -162,7 +280,6 @@ async def fetch_ohlcv_incremental(ex, exchange_name: str, symbol: str, timeframe
         since = since_ts + tf_map.get(timeframe, 1) * ms_in_min
 
     retries = 0
-    ohlcv = None
     while retries < 5:
         try:
             ohlcv = await ex.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=limit)
@@ -173,8 +290,7 @@ async def fetch_ohlcv_incremental(ex, exchange_name: str, symbol: str, timeframe
         except ccxt.ExchangeError as e:
             print(f"[{exchange_name}] Error en {symbol} {timeframe}: {e}")
             return pd.DataFrame()
-
-    if not ohlcv:
+    else:
         return pd.DataFrame()
 
     df = pd.DataFrame(ohlcv, columns=["ts", "open", "high", "low", "close", "volume"])
@@ -227,8 +343,8 @@ async def run_scanner(
     return {sym: data for sym, data in results}
 
 def main():
-    import argparse, json
-    parser = argparse.ArgumentParser(description="Crypto scanner barato (OHLCV + indicadores locales)")
+    import argparse
+    parser = argparse.ArgumentParser(description="Crypto scanner (OHLCV + indicadores locales + supersold/superbought)")
     parser.add_argument("--exchange", default="binance")
     parser.add_argument("--symbols", nargs="*", default=None)
     parser.add_argument("--timeframes", nargs="*", default=None)
@@ -257,11 +373,12 @@ def main():
         for sym, per_tf in data.items():
             for tf, info in per_tf.items():
                 if info.get("signal"):
+                    s = info["signal"]
                     found.append({
                         "symbol": sym, "timeframe": tf,
                         "price": info["last_close"],
-                        "signal": info["signal"]["signal"],
-                        "ts": info["signal"]["timestamp"]
+                        "signal": s["signal"],
+                        "ts": s["timestamp"]
                     })
         if found:
             df = pd.DataFrame(found).sort_values(["timeframe", "symbol"])
