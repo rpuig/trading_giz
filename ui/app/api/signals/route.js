@@ -28,15 +28,21 @@ export async function GET(req) {
   `;
 
   const db = getDB();
-  const stmt = db.prepare(sql);
-  const rows = stmt.all({ ...params, limit });
+  const rows = db.prepare(sql).all({ ...params, limit });
 
+  // meta
+  const all = db.prepare('SELECT exchange, symbol, timeframe, signal FROM signals LIMIT 100000').all();
   const uniq = (arr) => [...new Set(arr)].sort();
-  const allSql = db.prepare('SELECT exchange, symbol, timeframe, signal FROM signals LIMIT 100000').all();
-  const exchanges = uniq(allSql.map(r => r.exchange));
-  const symbols = uniq(allSql.map(r => r.symbol));
-  const timeframes = uniq(allSql.map(r => r.timeframe));
-  const signals = uniq(allSql.map(r => r.signal));
+
+  const exchanges = uniq(all.map(r => r.exchange));
+  const symbols   = uniq(all.map(r => r.symbol));
+  const timeframes= uniq(all.map(r => r.timeframe));
+  const dbSignals = uniq(all.map(r => r.signal));
+
+  // señales conocidas aunque aún no existan en la DB
+  const knownSignals = ['supersold','superbought','almost_supersold','almost_superbought'];
+
+  const signals = uniq([...dbSignals, ...knownSignals]);
 
   return NextResponse.json({ rows, meta: { exchanges, symbols, timeframes, signals } });
 }

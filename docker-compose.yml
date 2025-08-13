@@ -7,7 +7,7 @@ services:
     environment:
       - SCAN_INTERVAL=60
       - EXCHANGE=binance
-      - SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT
+      - SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,BTC/USDC,ETH/USDC
       - TIMEFRAMES=1m,5m,15m,1h,4h,1d
     volumes:
       - marketdb:/app

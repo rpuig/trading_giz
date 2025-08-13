@@ -118,83 +118,60 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 # ---------- señales ----------
 def compute_signal(df: pd.DataFrame) -> Optional[Dict]:
-    """Genera señales compuestas:
-    - supersold: TODOS en sobreventa
-    - superbought: TODOS en sobrecompra
+    """Senales compuestas con scoring:
+    - superbought / supersold: TODAS las condiciones (11/11)
+    - almost_superbought / almost_supersold: >= ALMOST_MIN_MATCH condiciones (por defecto 7/11)
+    Umbral configurable con env ALMOST_MIN_MATCH.
     """
+    import os
     if len(df) < 100:
         return None
     last = df.iloc[-1]
-    prev = df.iloc[-2]
 
-    # Umbrales
-    oversold = (
-        (last["close"] <= last["bb_low"]) and
-        (last["rsi14"] <= 30) and
-        (last["stoch_k"] <= 20) and (last["stoch_d"] <= 20) and
-        (last["cci20"] <= -100) and
-        (last["macd"] < last["macd_signal"]) and (last["macd"] < 0) and
-        (last["close"] < last["sma50"]) and (last["close"] < last["sma100"]) and
-        (last["obv"] < last["obv_ema7"]) and
-        (last["-di14"] > last["+di14"]) and (last["adx14"] >= 18)
-    )
+    ALMOST_MIN = int(os.getenv("ALMOST_MIN_MATCH", "7"))
 
-    overbought = (
-        (last["close"] >= last["bb_up"]) and
-        (last["rsi14"] >= 70) and
-        (last["stoch_k"] >= 80) and (last["stoch_d"] >= 80) and
-        (last["cci20"] >= 100) and
-        (last["macd"] > last["macd_signal"]) and (last["macd"] > 0) and
-        (last["close"] > last["sma50"]) and (last["close"] > last["sma100"]) and
-        (last["obv"] > last["obv_ema7"]) and
-        (last["+di14"] > last["-di14"]) and (last["adx14"] >= 18)
-    )
+    # Condiciones en sobreventa
+    oversold_conds = [
+        (last["close"] <= last["bb_low"]),
+        (last["rsi14"] <= 30),
+        (last["stoch_k"] <= 20),
+        (last["stoch_d"] <= 20),
+        (last["cci20"] <= -100),
+        (last["macd"] < last["macd_signal"]),
+        (last["macd"] < 0),
+        (last["close"] < last["sma50"]),
+        (last["close"] < last["sma100"]),
+        (last["obv"] < last["obv_ema7"]),
+        (last["-di14"] > last["+di14"]) and (last["adx14"] >= 18),
+    ]
 
-    if oversold:
-        return {
-            "timestamp": int(last.name),
-            "price": float(last["close"]),
-            "signal": "supersold",
-            "details": {
-                "rsi14": float(last["rsi14"]),
-                "stoch_k": float(last["stoch_k"]),
-                "stoch_d": float(last["stoch_d"]),
-                "cci20": float(last["cci20"]),
-                "macd": float(last["macd"]),
-                "macd_signal": float(last["macd_signal"]),
-                "bb_low": float(last["bb_low"]),
-                "sma50": float(last["sma50"]),
-                "sma100": float(last["sma100"]),
-                "obv": float(last["obv"]),
-                "obv_ema7": float(last["obv_ema7"]),
-                "+di14": float(last["+di14"]),
-                "-di14": float(last["-di14"]),
-                "adx14": float(last["adx14"])
-            }
-        }
+    # Condiciones en sobrecompra
+    overbought_conds = [
+        (last["close"] >= last["bb_high"]),
+        (last["rsi14"] >= 70),
+        (last["stoch_k"] >= 80),
+        (last["stoch_d"] >= 80),
+        (last["cci20"] >= 100),
+        (last["macd"] > last["macd_signal"]),
+        (last["macd"] > 0),
+        (last["close"] > last["sma50"]),
+        (last["close"] > last["sma100"]),
+        (last["obv"] > last["obv_ema7"]),
+        (last["+di14"] > last["-di14"]) and (last["adx14"] >= 18),
+    ]
 
-    if overbought:
-        return {
-            "timestamp": int(last.name),
-            "price": float(last["close"]),
-            "signal": "superbought",
-            "details": {
-                "rsi14": float(last["rsi14"]),
-                "stoch_k": float(last["stoch_k"]),
-                "stoch_d": float(last["stoch_d"]),
-                "cci20": float(last["cci20"]),
-                "macd": float(last["macd"]),
-                "macd_signal": float(last["macd_signal"]),
-                "bb_up": float(last["bb_up"]),
-                "sma50": float(last["sma50"]),
-                "sma100": float(last["sma100"]),
-                "obv": float(last["obv"]),
-                "obv_ema7": float(last["obv_ema7"]),
-                "+di14": float(last["+di14"]),
-                "-di14": float(last["-di14"]),
-                "adx14": float(last["adx14"])
-            }
-        }
+    # Comprobar totales
+    oversold_count = sum(oversold_conds)
+    overbought_count = sum(overbought_conds)
+
+    if oversold_count == len(oversold_conds):
+        return {"signal": "supersold"}
+    elif overbought_count == len(overbought_conds):
+        return {"signal": "superbought"}
+    elif oversold_count >= ALMOST_MIN:
+        return {"signal": "almost_supersold"}
+    elif overbought_count >= ALMOST_MIN:
+        return {"signal": "almost_superbought"}
 
     return None
 
