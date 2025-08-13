@@ -5,44 +5,66 @@ import { getDB } from '@/lib/db';
 
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
-  const exchange = searchParams.get('exchange') || '';
-  const symbol = searchParams.get('symbol') || '';
+  const exchange  = searchParams.get('exchange')  || '';
+  const symbol    = searchParams.get('symbol')    || '';
   const timeframe = searchParams.get('timeframe') || '';
-  const signal = searchParams.get('signal') || '';
-  const limit = Number(searchParams.get('limit') || '500');
+  const signal    = searchParams.get('signal')    || '';
+  const limit     = Number(searchParams.get('limit') || '500');
 
   const filters = [];
   const params = {};
-  if (exchange) { filters.push('exchange = @exchange'); params.exchange = exchange; }
-  if (symbol)   { filters.push('symbol = @symbol');     params.symbol = symbol; }
-  if (timeframe){ filters.push('timeframe = @tf');      params.tf = timeframe; }
-  if (signal)   { filters.push('signal = @sig');        params.sig = signal; }
+  if (exchange)  { filters.push('exchange = @exchange');   params.exchange = exchange; }
+  if (symbol)    { filters.push('symbol = @symbol');       params.symbol   = symbol; }
+  if (timeframe) { filters.push('timeframe = @timeframe'); params.timeframe= timeframe; }
+  if (signal)    { filters.push('signal = @signal');       params.signal   = signal; }
 
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-  const sql = `
-    SELECT exchange, symbol, timeframe, ts, signal, price, payload
-    FROM signals
-    ${where}
-    ORDER BY ts DESC
-    LIMIT @limit
-  `;
 
   const db = getDB();
-  const rows = db.prepare(sql).all({ ...params, limit });
 
-  // meta
-  const all = db.prepare('SELECT exchange, symbol, timeframe, signal FROM signals LIMIT 100000').all();
-  const uniq = (arr) => [...new Set(arr)].sort();
+  // filas de señales (tabla signals)
+  const rows = db.prepare(
+    `SELECT exchange, symbol, timeframe, ts, signal, price, payload
+     FROM signals
+     ${where}
+     ORDER BY ts DESC
+     LIMIT @limit`
+  ).all({ ...params, limit });
 
-  const exchanges = uniq(all.map(r => r.exchange));
-  const symbols   = uniq(all.map(r => r.symbol));
-  const timeframes= uniq(all.map(r => r.timeframe));
-  const dbSignals = uniq(all.map(r => r.signal));
+  // -------- META: construir desplegables desde candles ∪ signals --------
+  const unions = {
+    exchanges: db.prepare(`
+      SELECT exchange FROM candles GROUP BY exchange
+      UNION
+      SELECT exchange FROM signals GROUP BY exchange
+    `).all().map(r => r.exchange),
 
-  // señales conocidas aunque aún no existan en la DB
+    symbols: db.prepare(`
+      SELECT symbol FROM candles GROUP BY symbol
+      UNION
+      SELECT symbol FROM signals GROUP BY symbol
+    `).all().map(r => r.symbol),
+
+    timeframes: db.prepare(`
+      SELECT timeframe FROM candles GROUP BY timeframe
+      UNION
+      SELECT timeframe FROM signals GROUP BY timeframe
+    `).all().map(r => r.timeframe),
+
+    signals: db.prepare(`SELECT signal FROM signals GROUP BY signal`).all().map(r => r.signal),
+  };
+
+  // Señales “conocidas” aunque aún no existan
   const knownSignals = ['supersold','superbought','almost_supersold','almost_superbought'];
 
-  const signals = uniq([...dbSignals, ...knownSignals]);
+  const uniqSort = (arr) => [...new Set(arr)].sort();
 
-  return NextResponse.json({ rows, meta: { exchanges, symbols, timeframes, signals } });
+  const meta = {
+    exchanges: uniqSort(unions.exchanges),
+    symbols:   uniqSort(unions.symbols),
+    timeframes:uniqSort(unions.timeframes),
+    signals:   uniqSort([...unions.signals, ...knownSignals]),
+  };
+
+  return NextResponse.json({ rows, meta });
 }
